@@ -512,15 +512,60 @@ def generate_full_report() -> str:
 # ============================================================================
 
 async def send_telegram(message: str) -> bool:
-    """Send via Telegram."""
+    """Send via Telegram in multiple smaller messages if needed."""
     try:
         from telegram import Bot
+        
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
-        await bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=f"<pre>{message}</pre>",
-            parse_mode='HTML'
-        )
+        
+        # Telegram max message length is ~4096 chars
+        max_length = 4000
+        chunks = []
+        
+        # Split by sections ("====" markers)
+        sections = message.split("\n" + "=" * 60 + "\n")
+        
+        current_chunk = ""
+        for section in sections:
+            if len(current_chunk) + len(section) + 50 > max_length and current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = ""
+            current_chunk += section + "\n" + "=" * 60 + "\n"
+        
+        if current_chunk:
+            chunks.append(current_chunk)
+        
+        # If still too long, split by lines
+        final_chunks = []
+        for chunk in chunks:
+            if len(chunk) > max_length:
+                lines = chunk.split("\n")
+                current = ""
+                for line in lines:
+                    if len(current) + len(line) + 1 > max_length:
+                        final_chunks.append(current)
+                        current = ""
+                    current += line + "\n"
+                if current:
+                    final_chunks.append(current)
+            else:
+                final_chunks.append(chunk)
+        
+        # Send all chunks
+        for i, chunk in enumerate(final_chunks):
+            # Clean up HTML for telegram
+            clean_chunk = chunk.replace("**", "").replace("`", "").replace("   ", " ")
+            # Wrap in code block to preserve formatting
+            formatted = f"```\n{clean_chunk}```"
+            await bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=formatted,
+                parse_mode='Markdown'
+            )
+            # Small delay between messages
+            await asyncio.sleep(0.5)
+        
+        logger.info(f"Sent {len(final_chunks)} Telegram messages")
         return True
     except Exception as e:
         logger.error(f"Telegram error: {e}")
